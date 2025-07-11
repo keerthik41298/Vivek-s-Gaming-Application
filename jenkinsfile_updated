@@ -73,7 +73,7 @@ pipeline {
             }
         }   
             
-        stage('DOCKER DEPLOYMENT Version2') {
+        stage('DOCKER DEPLOYMENT Version1') {
             steps {
                 sh "docker run -d -p 8090:8080 vm2322/gaming:latest"
             }
