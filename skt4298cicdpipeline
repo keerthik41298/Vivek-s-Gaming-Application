@@ -1,0 +1,148 @@
+pipeline {
+    agent any
+    
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+//git with credentials   
+    stages {
+        stage('GIT CHECKOUT') {
+            steps {
+                git credentialsId: 'github-cred',
+                    branch: 'main',
+                    url: 'https://github.com/keerthik41298/Vivek-s-Gaming-Application'
+            }
+        }
+//git without credentials
+        // stage('GIT CHECKOUT') {
+        //     steps {
+        //        git branch: 'main', url: 'https://github.com/VM2322/Vivek-s-Gaming-Application'
+        //     }
+        // }
+    
+    stage('MAVEN COMPILE') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+        
+        stage('MAVEN NEW TESTING') {
+            steps {
+                sh "mvn test"
+            }
+        }
+    #addition of trivy for filesystem scanning
+    stage('TRIVY FILESYSTEM SCAN') {
+            steps {
+                sh "trivy fs --format table -o trivy-fs-report.html ."
+            }
+        }
+
+        #set sonarqubeenvironment above
+    #sonarqube analysis stage
+    stage('SONARQUBE ANALYSIS') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Gaming -Dsonar.projectKey=Gaming\
+                            -Dsonar.java.binaries=. '''
+                }
+            }
+       }
+
+    stage('QUALITY GATES') {
+            steps {
+                script {
+                  waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                }
+            }
+        }
+    stage('MAVEN BUILD') {
+            steps {
+               sh "mvn package"
+            }
+        }
+        
+    // stage('BUILD & TAG DOCKER IMAGES') {
+    //         steps {
+    //            script {
+    //                withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+    //                         sh "docker build -t skt4298/gaming:latest ."
+    //                         // sh "docker push skt4298/gaming:latest"
+    //                }
+    //            }
+    //         }
+    // }
+ 
+    stage('BUILD & TAG DOCKER IMAGES') {
+        steps {
+            script {
+                docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
+                    def app = docker.build("skt4298/gaming:latest")
+                    app.push('latest')
+                }
+            }
+        }
+    }
+   
+    stage('IMAGE SCANNING') {
+            steps {
+                sh "trivy image --format table -o trivy-image-report.html skt4298/gaming:latest "
+            }
+        }   
+            
+    // stage('DOCKER DEPLOYMENT') {
+    //         steps {
+    //             sh "docker run -d -p 8090:8080 skt4298/gaming:latest"
+    //         }
+    //     }   
+
+// this below docker deployment remove the existing container and launch new one with same port 
+// by using container_name
+    // stage('DOCKER DEPLOYMENT') {
+    //         steps {
+    //             script {
+    //                 def containerName = 'gaming-app'
+
+    //                 // Stop and remove if container exists
+    //                 sh """
+    //                     if [ \$(docker ps -a -q -f name=${containerName}) ]; then
+    //                         echo "Stopping existing container..."
+    //                         docker stop ${containerName}
+    //                         docker rm ${containerName}
+    //                     fi
+
+    //                     echo "Running new container on port 8090..."
+    //                     docker run -d -p 8090:8080 --name ${containerName} skt4298/gaming:latest
+    //                 """
+    //             }
+    //         }
+    //     }
+
+//container_id for the container which is already running on port 8090 --remove process
+    stage('DOCKER DEPLOYMENT') {
+            steps {
+                script {
+                    sh '''
+                        # Find container using port 8090
+                        container_id=$(docker ps -q --filter "publish=8090")
+
+                        if [ ! -z "$container_id" ]; then
+                            echo "Stopping and removing container running on port 8090..."
+                            docker stop $container_id
+                            docker rm $container_id
+                        fi
+
+                        echo "Running new container on port 8090..."
+                        docker run -d -p 8090:8080 skt4298/gaming:latest
+                    '''
+                }
+            }
+        }
+
+       
+    }     
+ }
